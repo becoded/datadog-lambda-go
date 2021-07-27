@@ -47,12 +47,12 @@ func TestSeparateVersionFromFunctionArnEmptyString(t *testing.T) {
 	assert.Empty(t, functionVersion)
 }
 
-var traceContextFromXray = TraceContext{
+var traceContextFromXray = Context{
 	traceIDHeader:  "1231452342",
 	parentIDHeader: "45678910",
 }
 
-var traceContextFromEvent = TraceContext{
+var traceContextFromEvent = Context{
 	traceIDHeader:  "1231452342",
 	parentIDHeader: "45678910",
 }
