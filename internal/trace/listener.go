@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DataDog/datadog-lambda-go/internal/extension"
 	"github.com/DataDog/datadog-lambda-go/internal/logger"
 	"github.com/DataDog/datadog-lambda-go/internal/version"
 	"github.com/aws/aws-lambda-go/lambdacontext"
@@ -24,14 +25,17 @@ import (
 type (
 	// Listener creates a function execution span and injects it into the context
 	Listener struct {
-		ddTraceEnabled  bool
-		mergeXrayTraces bool
+		ddTraceEnabled        bool
+		mergeXrayTraces       bool
+		extensionManager      *extension.ExtensionManager
+		traceContextExtractor ContextExtractor
 	}
 
 	// Config gives options for how the Listener should work
 	Config struct {
-		DDTraceEnabled  bool
-		MergeXrayTraces bool
+		DDTraceEnabled        bool
+		MergeXrayTraces       bool
+		TraceContextExtractor ContextExtractor
 	}
 )
 
@@ -41,11 +45,13 @@ var functionExecutionSpan ddtrace.Span
 var tracerInitialized = false
 
 // MakeListener initializes a new trace lambda Listener
-func MakeListener(config Config) Listener {
+func MakeListener(config Config, extensionManager *extension.ExtensionManager) Listener {
 
 	return Listener{
-		ddTraceEnabled:  config.DDTraceEnabled,
-		mergeXrayTraces: config.MergeXrayTraces,
+		ddTraceEnabled:        config.DDTraceEnabled,
+		mergeXrayTraces:       config.MergeXrayTraces,
+		extensionManager:      extensionManager,
+		traceContextExtractor: config.TraceContextExtractor,
 	}
 }
 
@@ -55,12 +61,12 @@ func (l *Listener) HandlerStarted(ctx context.Context, msg json.RawMessage) cont
 		return ctx
 	}
 
-	ctx, _ = contextWithRootTraceContext(ctx, msg, l.mergeXrayTraces)
+	ctx, _ = contextWithRootTraceContext(ctx, msg, l.mergeXrayTraces, l.traceContextExtractor)
 
 	if !tracerInitialized {
 		tracer.Start(
 			tracer.WithService("aws.lambda"),
-			tracer.WithLambdaMode(true),
+			tracer.WithLambdaMode(!l.extensionManager.IsExtensionRunning()),
 			tracer.WithGlobalTag("_dd.origin", "lambda"),
 		)
 		tracerInitialized = true
@@ -87,7 +93,7 @@ func (l *Listener) HandlerFinished(ctx context.Context, err error) {
 func startFunctionExecutionSpan(ctx context.Context, mergeXrayTraces bool) tracer.Span {
 	// Extract information from context
 	lambdaCtx, _ := lambdacontext.FromContext(ctx)
-	rootTraceContext, ok := ctx.Value(traceContextKey).(TraceContext)
+	rootTraceContext, ok := ctx.Value(traceContextKey).(Context)
 	if !ok {
 		logger.Error(fmt.Errorf("Error extracting trace context from context object"))
 	}

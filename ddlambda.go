@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataDog/datadog-lambda-go/internal/extension"
 	"github.com/DataDog/datadog-lambda-go/internal/logger"
 	"github.com/DataDog/datadog-lambda-go/internal/metrics"
 	"github.com/DataDog/datadog-lambda-go/internal/trace"
@@ -66,6 +67,9 @@ type (
 		// the counter will get totally reset after CircuitBreakerInterval
 		// default: 4
 		CircuitBreakerTotalFailures uint32
+		// TraceContextExtractor is the function that extracts a root/parent trace context from the Lambda event body.
+		// See trace.DefaultTraceExtractor for an example.
+		TraceContextExtractor trace.ContextExtractor
 	}
 )
 
@@ -100,9 +104,11 @@ func WrapHandler(handler interface{}, cfg *Config) interface{} {
 		logger.SetLogLevel(logger.LevelDebug)
 	}
 
+	extensionManager := extension.BuildExtensionManager()
+
 	// Wrap the handler with listeners that add instrumentation for traces and metrics.
-	tl := trace.MakeListener(cfg.toTraceConfig())
-	ml := metrics.MakeListener(cfg.toMetricsConfig())
+	tl := trace.MakeListener(cfg.toTraceConfig(), extensionManager)
+	ml := metrics.MakeListener(cfg.toMetricsConfig(), extensionManager)
 	return wrapper.WrapHandlerWithListeners(handler, &tl, &ml)
 }
 
@@ -171,7 +177,6 @@ func InvokeDryRun(callback func(ctx context.Context), cfg *Config) (interface{},
 }
 
 func (cfg *Config) toTraceConfig() trace.Config {
-
 	traceConfig := trace.Config{
 		DDTraceEnabled:  false,
 		MergeXrayTraces: false,
@@ -180,6 +185,11 @@ func (cfg *Config) toTraceConfig() trace.Config {
 	if cfg != nil {
 		traceConfig.DDTraceEnabled = cfg.DDTraceEnabled
 		traceConfig.MergeXrayTraces = cfg.MergeXrayTraces
+		traceConfig.TraceContextExtractor = cfg.TraceContextExtractor
+	}
+
+	if traceConfig.TraceContextExtractor == nil {
+		traceConfig.TraceContextExtractor = trace.DefaultTraceExtractor
 	}
 
 	if !traceConfig.DDTraceEnabled {
